@@ -111,6 +111,12 @@ npm run dev
 
 ---
 
+https://github.com/user-attachments/assets/d0f225dd-5e8a-428a-bd74-b8b3e9a03527
+
+
+
+
+
 ## 📌 Vision
 
 IdeaLens AI aims to make startup validation accessible to everyone by providing instant, structured, and insightful feedback. Instead of relying solely on intuition, founders can use AI to identify blind spots, strengthen their business concepts, and make more informed decisions before building their products.
