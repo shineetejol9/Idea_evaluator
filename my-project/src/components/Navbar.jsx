@@ -760,11 +760,9 @@ async function callAI(messages) {
 
   return data.choices[0].message.content;
 }
+
 async function callStartupModelFromIdea(idea) {
-
   const features = new Array(34).fill(0);
-
-  // 🔥 Simple rule-based feature extraction
   const text = idea.toLowerCase();
 
   if (text.includes("ai")) features[0] = 1;
@@ -773,18 +771,24 @@ async function callStartupModelFromIdea(idea) {
   if (text.includes("marketplace")) features[3] = 1;
   if (text.includes("subscription")) features[4] = 1;
 
-  // add more rules if needed
+  const res = await fetch(
+    "https://idea-evaluator.onrender.com/evaluate",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ features }),
+    }
+  );
 
-  fetch("https://idea-evaluator.onrender.com/evaluate", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify(data)
-});
+  if (!res.ok) {
+    throw new Error(`ML API failed: ${res.status}`);
+  }
 
   return await res.json();
 }
+
 /* ── SCORE BAR ──────────────────────────────────────────────────── */
 function ScoreBar({ label, value, color }) {
   const [w, setW] = useState(0);
