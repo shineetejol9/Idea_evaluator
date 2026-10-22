@@ -775,15 +775,13 @@ async function callStartupModelFromIdea(idea) {
 
   // add more rules if needed
 
-  const res = await fetch("http://127.0.0.1:5000/evaluate", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      features: features
-    })
-  });
+  fetch("https://idea-evaluator.onrender.com/evaluate", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify(data)
+});
 
   return await res.json();
 }
