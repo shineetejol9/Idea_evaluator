@@ -3,7 +3,12 @@ import pickle
 import numpy as np
 
 app = Flask(__name__)
-
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "running",
+        "message": "Idea Evaluator API is online"
+    })
 # load trained model
 model = pickle.load(open("startup_model.pkl", "rb"))
 
