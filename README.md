@@ -66,39 +66,46 @@ For every submitted idea, IdeaLens AI generates:
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
-| Category | Technologies        |
-| -------- | ------------------- |
-| Frontend | React, Tailwind CSS |
-| Backend  | Node.js, Express.js |
-| Database | MongoDB             |
-| AI       | Google Gemini API   |
-| Styling  | Tailwind CSS        |
+| Category | Technologies |
+| --- | --- |
+| Frontend | React, Vite |
+| Backend | Flask, Gunicorn |
+| ML | scikit-learn |
+| AI | OpenRouter |
+| Styling | CSS, Tailwind |
 
----
+## Local Development
 
-## 🚀 Getting Started
-
-Clone the repository:
-
-```bash
-git clone https://github.com/your-username/IdeaLens-AI.git
-```
-
-Install dependencies:
-
-```bash
+```powershell
+cd my-project
 npm install
-```
-
-Start the development server:
-
-```bash
 npm run dev
 ```
 
----
+Vite uses `http://127.0.0.1:5000` for the local API unless `VITE_API_BASE_URL` is set. Run the backend from the repository root in another terminal:
+
+```powershell
+python -m venv venv
+venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python api.py
+```
+
+## Deployment
+
+Update the existing Render web service (do not create a second service) with **Root Directory** `.`, **Build Command** `pip install -r requirements.txt`, **Start Command** `gunicorn api:app`, and `PYTHON_VERSION=3.11.9`. Render supplies the `PORT` variable. The tracked `startup_model.pkl` is in the repository root beside `api.py`.
+
+For the Vercel project, set **Root Directory** to `my-project`, then set `VITE_API_BASE_URL` to `https://idea-evaluator.onrender.com` for Production (and Preview if needed). Redeploy after changing the variable.
+
+In the existing Render service's environment settings, set `FRONTEND_ORIGINS` to `https://idea-evaluator-jet.vercel.app,http://localhost:5173,http://127.0.0.1:5173`, `OPENROUTER_API_KEY` as a secret, and `OPENROUTER_MODEL` to a free model ID enabled for your OpenRouter account. `recursive/flint-v1.0:free` appeared in OpenRouter's public model catalog when this configuration was prepared; per-account availability is not guaranteed. The backend rejects model IDs that are not marked `:free` and does not fall back to a paid model. If this model is unavailable to your account, choose an available free ID from OpenRouter's catalog and update `OPENROUTER_MODEL` in Render.
+
+`backend.py` trains on `startup_data.csv`: it selects `int64`/`float64` columns, removes `labels`, and fills missing values with zero. It does not encode categorical text or convert startup-idea prose. The trained model expects 34 ordered numeric company attributes, including funding, location, and milestone data. The chat has an optional metrics section that requests these actual inputs; it never derives them from the idea text. One input, `Unnamed: 0`, is a dataset row index artifact rather than a company metric and must not be guessed. `/model-info` returns feature names in model order, and `/evaluate` accepts a validated numeric `features` array in that order, with `null` values zero-filled to match training. In this dataset label `1` means `acquired`, and label `0` means `closed`; `acquisition_probability` (also returned under the legacy `success_probability` key) is the model's estimated class-1 probability, not a verified measure of startup success or model accuracy.
+
+A `VITE_OPENROUTER_API_KEY` variable was present in the ignored local frontend environment and the old frontend source contained a provider authorization value. Remove any old frontend key from local and hosted Vercel settings, rotate the OpenRouter key if it was real, and configure the replacement only in Render. Ignored local `.env` files are not committed.
+
+Local tests cannot verify Render secrets, per-account model availability, or that the hosted Vercel deployment has been updated. Verify the live app in both hosting dashboards after deployment.
 
 ## 🎯 Use Cases
 

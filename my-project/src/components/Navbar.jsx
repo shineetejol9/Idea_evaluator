@@ -4,6 +4,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const FONT_URL =
   "https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap";
 
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? "http://127.0.0.1:5000" : "https://idea-evaluator.onrender.com")
+).replace(/\/+$/, "");
+
 /* ── CSS ──────────────────────────────────────────────────────── */
 const css = `
 @import url('${FONT_URL}');
@@ -229,6 +234,10 @@ body { font-family: var(--font-ui); background: var(--c-void); color: #e2e8f0; m
 .chat-input { width:100%; min-height:44px; max-height:120px; background:rgba(255,255,255,0.04); border:1px solid rgba(139,92,246,0.2); border-radius:12px; padding:11px 14px; font-size:13.5px; font-family:var(--font-ui); color:#e2e8f0; resize:none; outline:none; transition:border-color 0.2s,box-shadow 0.2s; line-height:1.5; }
 .chat-input::placeholder { color:rgba(148,163,184,0.4); }
 .chat-input:focus { border-color:rgba(168,85,247,0.45); box-shadow:0 0 0 3px rgba(168,85,247,0.08),0 0 20px rgba(168,85,247,0.08); }
+.model-inputs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px; max-height:30vh; overflow-y:auto; padding-right:4px; }
+.model-input-label { display:flex; flex-direction:column; gap:4px; font-size:10px; color:rgba(148,163,184,0.7); font-family:var(--font-mono); }
+.model-input { width:100%; min-height:34px; padding:6px 9px; border:1px solid rgba(139,92,246,0.2); border-radius:8px; background:rgba(255,255,255,0.04); color:#e2e8f0; font:12px var(--font-ui); }
+.model-input:focus { outline:none; border-color:rgba(168,85,247,0.45); }
 .chat-send { width:44px; height:44px; border-radius:12px; background:linear-gradient(135deg,#7c3aed,#4f46e5); border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; transition:all 0.2s; box-shadow:0 0 16px rgba(124,58,237,0.4); }
 .chat-send:hover { transform:translateY(-1px); box-shadow:0 0 24px rgba(124,58,237,0.6); }
 .chat-send:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
@@ -564,7 +573,7 @@ body { font-family: var(--font-ui); background: var(--c-void); color: #e2e8f0; m
 }
 
 @media (max-width:860px) { .nav-links{display:none !important} .avatar-name{display:none} .hamburger{display:flex !important} .stats-grid{grid-template-columns:1fr 1fr} }
-@media (max-width:600px) { .chat-overlay{padding:12px} .chat-panel{height:92vh;border-radius:18px} .score-grid{grid-template-columns:1fr 1fr} }
+@media (max-width:600px) { .chat-overlay{padding:12px} .chat-panel{height:92vh;border-radius:18px} .score-grid{grid-template-columns:1fr 1fr} .model-inputs{grid-template-columns:1fr} }
 @media (max-width:520px) { .page-content{padding:48px 20px 80px} .stats-grid{grid-template-columns:1fr} }
 `;
 
@@ -634,12 +643,17 @@ const AISparkIcon = () => (
 
 /* ── PARTICLES ─────────────────────────────────────────────────── */
 const PARTICLE_COLORS = ["#a855f7", "#6366f1", "#06b6d4", "#f472b6", "#818cf8"];
+const seededRandom = (seed) => {
+  const value = Math.sin(seed * 12.9898) * 43758.5453;
+  return value - Math.floor(value);
+};
+
 function Particles() {
   const particles = Array.from({ length: 22 }, (_, i) => ({
-    id: i, left: `${Math.random() * 100}%`, width: `${Math.random() * 3 + 1}px`,
+    id: i, left: `${seededRandom(i + 1) * 100}%`, width: `${seededRandom(i + 23) * 3 + 1}px`,
     color: PARTICLE_COLORS[i % PARTICLE_COLORS.length],
-    duration: `${Math.random() * 18 + 12}s`, delay: `${Math.random() * 12}s`,
-    opacity: Math.random() * 0.4 + 0.1,
+    duration: `${seededRandom(i + 47) * 18 + 12}s`, delay: `${seededRandom(i + 71) * 12}s`,
+    opacity: seededRandom(i + 97) * 0.4 + 0.1,
   }));
   return (
     <div className="particles-wrap" aria-hidden>
@@ -690,106 +704,117 @@ const NAV = [
 ];
 
 /* ── AI ENGINE ──────────────────────────────────────────────────── */
-const SYSTEM_PROMPT = `You are Idea Evaluator AI.
-
-Explain startup ideas in VERY SIMPLE English so that even a beginner can understand.
-
-Always follow this format:
-
-1. Start with a short friendly feedback:
-"Your idea is good because..." or "This is an interesting idea because..."
-
-2. Then give sections:
-
-### Problem
-Explain in simple words
-
-### Objective
-Simple goal
-
-### Solution
-Explain like you are talking to a beginner
-
-### Execution
-Simple steps (no complex words)
-
-### Strengths
-2-3 simple bullet points
-
-### Risks
-2-3 simple bullet points
-
-### Recommendation
-One clear suggestion
-
-IMPORTANT:
-- Use very simple English
-- Avoid technical jargon
-- Keep sentences short
-- Make it easy to understand
-
-At the end ALWAYS output:
-
-SCORES:{"innovation":XX,"market":XX,"feasibility":XX}
-`;
-
 async function callAI(messages) {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const response = await fetch(`${API_BASE_URL}/api/ai-evaluate`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY}`,
-      "HTTP-Referer": "http://localhost:5173",
-      "X-Title": "Idea Evaluator AI"
-    },
-    body: JSON.stringify({
-      model: "deepseek/deepseek-chat",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        ...messages
-      ]
-    })
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages }),
   });
 
-  const data = await res.json();
-
-  if (!res.ok) {
-    console.error("OpenRouter error:", data);
-    throw new Error(data.error?.message || "API request failed");
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("The evaluation service returned an invalid response.");
   }
 
-  return data.choices[0].message.content;
-}
-
-async function callStartupModelFromIdea(idea) {
-  const features = new Array(34).fill(0);
-  const text = idea.toLowerCase();
-
-  if (text.includes("ai")) features[0] = 1;
-  if (text.includes("health")) features[1] = 1;
-  if (text.includes("app")) features[2] = 1;
-  if (text.includes("marketplace")) features[3] = 1;
-  if (text.includes("subscription")) features[4] = 1;
-
-  const res = await fetch(
-    "https://idea-evaluator.onrender.com/evaluate",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ features }),
-    }
-  );
-
-  if (!res.ok) {
-    throw new Error(`ML API failed: ${res.status}`);
+  if (!response.ok) {
+    throw new Error(data?.error || `Evaluation request failed (${response.status}).`);
+  }
+  if (typeof data?.reply !== "string" || !data.reply.trim()) {
+    throw new Error("The evaluation service returned an empty response.");
   }
 
-  return await res.json();
+  return data.reply;
 }
 
-/* ── SCORE BAR ──────────────────────────────────────────────────── */
+async function callML(features) {
+  const response = await fetch(`${API_BASE_URL}/evaluate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ features }),
+  });
+
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("The ML service returned an invalid response.");
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.error || `ML request failed (${response.status}).`);
+  }
+  if (
+    !Number.isInteger(data?.prediction) ||
+    !["acquired", "closed"].includes(data?.prediction_label) ||
+    !Number.isFinite(data?.acquisition_probability) ||
+    data.acquisition_probability < 0 ||
+    data.acquisition_probability > 1
+  ) {
+    throw new Error("The ML service returned an invalid prediction.");
+  }
+
+  return data;
+}
+
+const FEATURE_LABELS = {
+  "Unnamed: 0": "Training dataset row index (required artifact)",
+  latitude: "Latitude",
+  longitude: "Longitude",
+  age_first_funding_year: "Years to first funding",
+  age_last_funding_year: "Years to latest funding",
+  age_first_milestone_year: "Years to first milestone",
+  age_last_milestone_year: "Years to latest milestone",
+  relationships: "Founder relationships",
+  funding_rounds: "Funding rounds",
+  funding_total_usd: "Total funding (USD)",
+  milestones: "Milestones",
+  is_CA: "Located in California",
+  is_NY: "Located in New York",
+  is_MA: "Located in Massachusetts",
+  is_TX: "Located in Texas",
+  is_otherstate: "Located in another state",
+  is_software: "Software industry",
+  is_web: "Web industry",
+  is_mobile: "Mobile industry",
+  is_enterprise: "Enterprise industry",
+  is_advertising: "Advertising industry",
+  is_gamesvideo: "Games/video industry",
+  is_ecommerce: "E-commerce industry",
+  is_biotech: "Biotech industry",
+  is_consulting: "Consulting industry",
+  is_othercategory: "Other industry category",
+  has_VC: "Has venture capital funding",
+  has_angel: "Has angel funding",
+  has_roundA: "Has Series A funding",
+  has_roundB: "Has Series B funding",
+  has_roundC: "Has Series C funding",
+  has_roundD: "Has Series D funding",
+  avg_participants: "Average funding-round participants",
+  is_top500: "In top 500",
+};
+
+const isBinaryFeature = (name) => name.startsWith("is_") || name.startsWith("has_");
+const NULLABLE_TRAINING_FEATURES = new Set([
+  "age_first_milestone_year",
+  "age_last_milestone_year",
+]);
+const LOCATION_FEATURES = ["is_CA", "is_NY", "is_MA", "is_TX", "is_otherstate"];
+const INDUSTRY_FEATURES = [
+  "is_software",
+  "is_web",
+  "is_mobile",
+  "is_enterprise",
+  "is_advertising",
+  "is_gamesvideo",
+  "is_ecommerce",
+  "is_biotech",
+  "is_consulting",
+  "is_othercategory",
+];
+/* SCORE BAR */
+/* SCORE BAR */
 function ScoreBar({ label, value, color }) {
   const [w, setW] = useState(0);
   useEffect(() => { const t = setTimeout(() => setW(value), 150); return () => clearTimeout(t); }, [value]);
@@ -812,18 +837,21 @@ function MessageBubble({ msg }) {
 
   if (sm) {
     try {
-      scores = JSON.parse(sm[1]);
-    } catch (_) { }
+      const parsedScores = JSON.parse(sm[1]);
+      const scoreNames = ["innovation", "market", "feasibility"];
+      if (scoreNames.every(name => (
+        Number.isInteger(parsedScores[name]) &&
+        parsedScores[name] >= 0 &&
+        parsedScores[name] <= 100
+      ))) {
+        scores = Object.fromEntries(scoreNames.map(name => [name, parsedScores[name]]));
+      }
+    } catch {
+      scores = null;
+    }
   }
 
-  // 🚨 If AI fails to give scores → use defaults
-
-
-  // Always call ML model
-
-
-  // remove scores text from AI message
-  text = text.replace(/SCORES:\{[^}]+\}/, "").trim();
+  if (scores) text = text.replace(/SCORES:\{[^}]+\}/, "").trim();
 
   const fmt = (t) =>
     t.split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
@@ -925,91 +953,133 @@ function ChatPanel({ onClose }) {
   const [messages, setMessages] = useState([WELCOME]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [modelFeatures, setModelFeatures] = useState([]);
+  const [metricValues, setMetricValues] = useState({});
+  const [modelInfoError, setModelInfoError] = useState("");
+  const [aiError, setAiError] = useState("");
+  const [mlNotice, setMlNotice] = useState("");
   const endRef = useRef(null);
   const inputRef = useRef(null);
+  const requestInFlight = useRef(false);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 400); }, []);
+  useEffect(() => {
+    const loadModelInfo = async () => {
+      const response = await fetch(`${API_BASE_URL}/model-info`);
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The ML service returned an invalid feature list.");
+      }
+
+      if (!response.ok || !Array.isArray(data.features) || data.features.length !== data.feature_count) {
+        throw new Error(data.error || "The ML model feature list is unavailable.");
+      }
+      setModelFeatures(data.features);
+    };
+
+    loadModelInfo().catch(error => setModelInfoError(error.message));
+  }, []);
 
   const handleSend = useCallback(async (text) => {
-    const trimmed = (text || input).trim();
-
-    // ❌ REMOVE loading block for prompts
+    if (requestInFlight.current) return;
+    const trimmed = (typeof text === "string" ? text : input).trim();
     if (!trimmed) return;
 
-    if (loading && !text) return; // allow prompt clicks
-
-    setError(null);
-
+    requestInFlight.current = true;
+    setLoading(true);
+    setInput("");
+    setAiError("");
+    setMlNotice("");
     const userMsg = { role: "user", content: trimmed };
+    const conversation = [...messages, userMsg];
+    setMessages(conversation);
+    const apiHistory = conversation
+      .filter(message => message.role === "user" || (message.role === "assistant" && !message.source))
+      .slice(-14)
+      .map(({ role, content }) => ({ role, content }));
 
-    // 👉 CALL ML MODEL HERE
-    let mlResult;
+    const aiRequest = callAI(apiHistory)
+      .then(reply => setMessages(previous => [...previous, { role: "assistant", content: reply }]))
+      .catch(error => setAiError(`AI evaluation could not be completed: ${error.message}`));
 
-    try {
-      mlResult = await callStartupModelFromIdea(trimmed);
-    } catch (e) {
-      console.log("ML error:", e);
-
-      mlResult = {
-        success_probability: 0.6
-      };
+    const providedMetricCount = Object.values(metricValues).filter(value => value !== "").length;
+    let mlRequest;
+    if (providedMetricCount === 0) {
+      setMlNotice(modelInfoError
+        ? `ML prediction skipped: ${modelInfoError}`
+        : "ML prediction skipped: enter company metrics below. A free-text idea alone does not provide the model's required inputs.");
+      mlRequest = Promise.resolve();
+    } else if (modelFeatures.length === 0) {
+      setMlNotice(`ML prediction skipped: ${modelInfoError || "the model feature list has not loaded"}`);
+      mlRequest = Promise.resolve();
+    } else {
+      const features = modelFeatures.map(name => (
+        metricValues[name] === undefined || metricValues[name] === ""
+          ? null
+          : Number(metricValues[name])
+      ));
+      const rowIndex = metricValues["Unnamed: 0"];
+      const invalidBinaryFeatureIndex = modelFeatures.findIndex((name, index) => (
+        isBinaryFeature(name) && features[index] !== null && ![0, 1].includes(features[index])
+      ));
+      const missingRequiredFeatures = modelFeatures.filter((name, index) => (
+        features[index] === null && !NULLABLE_TRAINING_FEATURES.has(name)
+      ));
+      const featureValues = Object.fromEntries(modelFeatures.map((name, index) => [name, features[index]]));
+      const locationFlagCount = LOCATION_FEATURES.reduce(
+        (count, name) => count + (featureValues[name] === 1 ? 1 : 0),
+        0,
+      );
+      const industryFlagCount = INDUSTRY_FEATURES.reduce(
+        (count, name) => count + (featureValues[name] === 1 ? 1 : 0),
+        0,
+      );
+      if (rowIndex === undefined || rowIndex === "") {
+        setMlNotice("ML prediction skipped: this model includes a training-row index that is not derivable from an idea. Enter its real value only if you have it; do not guess.");
+        mlRequest = Promise.resolve();
+      } else if (features.some(value => value !== null && !Number.isFinite(value))) {
+        setMlNotice("ML prediction skipped: enter valid finite numbers for company metrics.");
+        mlRequest = Promise.resolve();
+      } else if (missingRequiredFeatures.length > 0) {
+        const firstMissing = FEATURE_LABELS[missingRequiredFeatures[0]] || missingRequiredFeatures[0];
+        setMlNotice(`ML prediction skipped: provide all model fields with actual values. Missing: ${firstMissing}${missingRequiredFeatures.length > 1 ? ` and ${missingRequiredFeatures.length - 1} more` : ""}.`);
+        mlRequest = Promise.resolve();
+      } else if (invalidBinaryFeatureIndex !== -1) {
+        const invalidFeatureName = modelFeatures[invalidBinaryFeatureIndex];
+        setMlNotice(`ML prediction skipped: ${FEATURE_LABELS[invalidFeatureName] || invalidFeatureName} must be 0 or 1.`);
+        mlRequest = Promise.resolve();
+      } else if (locationFlagCount > 1 || industryFlagCount !== 1) {
+        setMlNotice("ML prediction skipped: choose no more than one location flag and exactly one industry flag.");
+        mlRequest = Promise.resolve();
+      } else {
+        const blankMetricCount = features.filter(value => value === null).length;
+        mlRequest = callML(features)
+          .then(result => {
+            const missingNote = blankMetricCount > 0
+              ? `\nBlank fields were filled with 0 to match training (${blankMetricCount} fields).`
+              : "";
+            const content = `ML model prediction (company metrics; not inferred from idea text)\nPredicted label: ${result.prediction_label}\nEstimated probability of acquisition: ${(result.acquisition_probability * 100).toFixed(1)}%${missingNote}`;
+            setMessages(previous => [...previous, {
+              role: "assistant",
+              source: "ml",
+              content,
+            }]);
+          })
+          .catch(error => setMlNotice(`ML prediction failed: ${error.message}`));
+      }
     }
 
-    // 👉 SHOW ML RESULT
-    const prob = mlResult.success_probability * 100;
-
-    const scoresFromML = {
-      innovation: Math.round(prob * 0.9),
-      market: Math.round(prob),
-      feasibility: Math.round(prob * 0.8)
-    };
-
-    const mlMessage = {
-      role: "assistant",
-      content: `
-### Model Prediction
-Startup success probability: ${(prob).toFixed(1)}%
-
-SCORES:${JSON.stringify(scoresFromML)}
-`
-    };
-
-    setMessages(prev => [...prev, userMsg, mlMessage]);
-
-    setInput("");
-    setLoading(true);
-
-    const updatedMessages = [...messages, userMsg, mlMessage];
-
-    // update UI first
-    setMessages(updatedMessages);
-    setInput("");
-
     try {
-      const apiHistory = updatedMessages.slice(-14);
-
-      const reply = await callAI(apiHistory);
-
-      setMessages(prev => [
-        ...prev,
-        { role: "assistant", content: reply }
-      ]);
-
-    } catch (e) {
-      setMessages(prev => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "⚠️ AI failed, but ML prediction still works."
-        }
-      ]);
+      await Promise.allSettled([aiRequest, mlRequest]);
     } finally {
       setLoading(false);
+      requestInFlight.current = false;
     }
 
-  }, [input, loading, messages]);
+  }, [input, messages, metricValues, modelFeatures, modelInfoError]);
 
   const handleKey = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } };
 
@@ -1056,6 +1126,38 @@ SCORES:${JSON.stringify(scoresFromML)}
 
       {/* Input */}
       <div className="chat-input-area">
+        <details style={{ marginBottom: 10, color: "rgba(148,163,184,0.7)", fontSize: 11 }}>
+          <summary style={{ cursor: "pointer", fontFamily: "var(--font-mono)" }}>
+            Optional: enter company metrics for an ML prediction
+          </summary>
+          <div style={{ marginTop: 8, lineHeight: 1.5 }}>
+            These are the trained model inputs, not values inferred from your idea. Provide actual values for every field except the two milestone-age fields, which may be blank as in training. Binary fields use 0 or 1; choose exactly one industry and no more than one location. The required dataset-row index is a training artifact, not a company metric; do not guess it.
+          </div>
+          {modelInfoError && (
+            <div className="chat-hint" role="status">{modelInfoError}</div>
+          )}
+          <div className="model-inputs">
+            {modelFeatures.map(name => (
+              <label className="model-input-label" key={name}>
+                {FEATURE_LABELS[name] || name.replaceAll("_", " ")}{isBinaryFeature(name) ? " (0 or 1)" : ""}
+                <input
+                  className="model-input"
+                  type="number"
+                  step={isBinaryFeature(name) || name === "Unnamed: 0" ? 1 : "any"}
+                  min={name === "Unnamed: 0" ? 1 : isBinaryFeature(name) ? 0 : undefined}
+                  max={name === "Unnamed: 0" ? 923 : isBinaryFeature(name) ? 1 : undefined}
+                  value={metricValues[name] ?? ""}
+                  disabled={loading}
+                  onChange={event => setMetricValues(previous => ({
+                    ...previous,
+                    [name]: event.target.value,
+                  }))}
+                  aria-label={name}
+                />
+              </label>
+            ))}
+          </div>
+        </details>
         <div className="chat-input-row">
           <div className="chat-input-wrap">
             <textarea
@@ -1073,6 +1175,8 @@ SCORES:${JSON.stringify(scoresFromML)}
             <SendIcon />
           </button>
         </div>
+        {aiError && <div className="chat-hint" role="alert">{aiError}</div>}
+        {mlNotice && <div className="chat-hint" role="status">{mlNotice}</div>}
         <div className="chat-hint">Enter to send · Shift+Enter for new line · Esc to close</div>
       </div>
     </div>
@@ -1113,16 +1217,7 @@ function HeroPage({ onEvaluate }) {
 /* ── ROOT ───────────────────────────────────────────────────────── */
 export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
-  const [loadingChat, setLoadingChat] = useState(false);
-
-  const handleEvaluate = () => {
-    setLoadingChat(true);
-
-    setTimeout(() => {
-      setLoadingChat(false);
-      setChatOpen(true);
-    }, 4000);
-  };
+  const handleEvaluate = () => setChatOpen(true);
 
   return (
     <>
