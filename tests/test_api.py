@@ -58,6 +58,39 @@ class ApiTests(TestCase):
             "success_probability": 0.8,
         })
 
+    def test_real_model_preserves_expected_feature_order_and_predictions(self):
+        model = api.load_model()
+        self.assertIsNotNone(model)
+
+        expected_features = [
+            "Unnamed: 0", "latitude", "longitude", "age_first_funding_year",
+            "age_last_funding_year", "age_first_milestone_year",
+            "age_last_milestone_year", "relationships", "funding_rounds",
+            "funding_total_usd", "milestones", "is_CA", "is_NY", "is_MA",
+            "is_TX", "is_otherstate", "is_software", "is_web", "is_mobile",
+            "is_enterprise", "is_advertising", "is_gamesvideo", "is_ecommerce",
+            "is_biotech", "is_consulting", "is_othercategory", "has_VC",
+            "has_angel", "has_roundA", "has_roundB", "has_roundC",
+            "has_roundD", "avg_participants", "is_top500",
+        ]
+        self.assertEqual(list(model.feature_names_in_), expected_features)
+
+        dataset = pd.read_csv(Path(api.__file__).resolve().with_name("startup_data.csv"))
+        row = dataset.loc[0, expected_features].fillna(0).tolist()
+        model_input = pd.DataFrame([row], columns=model.feature_names_in_)
+
+        prediction = model.predict(model_input)[0]
+        probabilities = model.predict_proba(model_input)[0]
+
+        self.assertEqual(list(model.classes_), [0, 1])
+        self.assertEqual(int(prediction), 1)
+        np.testing.assert_allclose(
+            probabilities,
+            np.array([0.32445318, 0.67554682]),
+            rtol=1e-7,
+            atol=1e-7,
+        )
+
     def test_trained_model_accepts_a_real_training_row(self):
         dataset_path = Path(api.__file__).resolve().with_name("startup_data.csv")
         training_data = pd.read_csv(dataset_path)

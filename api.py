@@ -38,7 +38,7 @@ def load_model():
     model_path = Path(__file__).resolve().with_name("startup_model.pkl")
     try:
         with model_path.open("rb") as model_file:
-            return pickle.load(model_file)
+            model = pickle.load(model_file)
     except (
         OSError,
         EOFError,
@@ -49,6 +49,14 @@ def load_model():
     ):
         app.logger.exception("Could not load the startup prediction model")
         return None
+
+    if (
+        model is not None
+        and model.__class__.__name__ == "LogisticRegression"
+        and not hasattr(model, "multi_class")
+    ):
+        model.multi_class = "ovr"
+    return model
 
 
 model = load_model()
