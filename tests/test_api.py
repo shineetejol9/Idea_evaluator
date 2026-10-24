@@ -195,7 +195,7 @@ class ApiTests(TestCase):
         }).encode("utf-8")
         environment = {
             "OPENROUTER_API_KEY": "test-key",
-            "OPENROUTER_MODEL": "recursive/flint-v1.0:free",
+            "OPENROUTER_MODEL": "google/gemma-4-31b-it:free",
         }
 
         with patch.dict(os.environ, environment, clear=True):
@@ -218,7 +218,11 @@ class ApiTests(TestCase):
         self.assertEqual(provider_request.get_header("Content-type"), "application/json")
         self.assertEqual(provider_request.get_header("Authorization"), "Bearer test-key")
         request_body = json.loads(provider_request.data)
-        self.assertEqual(request_body["model"], "recursive/flint-v1.0:free")
+        self.assertEqual(request_body["model"], "google/gemma-4-31b-it:free")
+        self.assertEqual(request_body["provider"], {
+            "only": ["google-ai-studio"],
+            "allow_fallbacks": False,
+        })
         self.assertEqual(request_body["messages"][-1], {
             "role": "user",
             "content": "A startup idea",
@@ -238,7 +242,7 @@ class ApiTests(TestCase):
 
         with patch.dict(os.environ, {
             "OPENROUTER_API_KEY": "test-key",
-            "OPENROUTER_MODEL": "recursive/flint-v1.0:free",
+            "OPENROUTER_MODEL": "google/gemma-4-31b-it:free",
         }, clear=True):
             with patch("api.urllib.request.urlopen", side_effect=error):
                 with patch.object(api.app.logger, "warning") as warning:
@@ -272,7 +276,7 @@ class ApiTests(TestCase):
 
         with patch.dict(os.environ, {
             "OPENROUTER_API_KEY": "test-key",
-            "OPENROUTER_MODEL": "recursive/flint-v1.0:free",
+            "OPENROUTER_MODEL": "google/gemma-4-31b-it:free",
         }, clear=True):
             with patch("api.urllib.request.urlopen", side_effect=error):
                 response = self.client.post(
@@ -295,7 +299,7 @@ class ApiTests(TestCase):
 
         with patch.dict(os.environ, {
             "OPENROUTER_API_KEY": "test-key",
-            "OPENROUTER_MODEL": "recursive/flint-v1.0:free",
+            "OPENROUTER_MODEL": "google/gemma-4-31b-it:free",
         }, clear=True):
             with patch("api.urllib.request.urlopen", side_effect=error):
                 response = self.client.post(
@@ -310,7 +314,7 @@ class ApiTests(TestCase):
     def test_ai_endpoint_handles_provider_timeout(self):
         with patch.dict(os.environ, {
             "OPENROUTER_API_KEY": "test-key",
-            "OPENROUTER_MODEL": "recursive/flint-v1.0:free",
+            "OPENROUTER_MODEL": "google/gemma-4-31b-it:free",
         }, clear=True):
             with patch("api.urllib.request.urlopen", side_effect=TimeoutError):
                 response = self.client.post(
@@ -326,7 +330,7 @@ class ApiTests(TestCase):
 
         with patch.dict(os.environ, {
             "OPENROUTER_API_KEY": "test-key",
-            "OPENROUTER_MODEL": "recursive/flint-v1.0:free",
+            "OPENROUTER_MODEL": "google/gemma-4-31b-it:free",
         }, clear=True):
             with patch("api.urllib.request.urlopen", return_value=provider_response):
                 response = self.client.post(
@@ -345,7 +349,7 @@ class ApiTests(TestCase):
 
         with patch.dict(os.environ, {
             "OPENROUTER_API_KEY": "test-key",
-            "OPENROUTER_MODEL": "recursive/flint-v1.0:free",
+            "OPENROUTER_MODEL": "google/gemma-4-31b-it:free",
         }, clear=True):
             with patch("api.urllib.request.urlopen", return_value=provider_response):
                 response = self.client.post(

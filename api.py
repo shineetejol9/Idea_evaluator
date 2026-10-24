@@ -296,6 +296,10 @@ def ai_evaluate():
     )
     provider_payload = json.dumps({
         "model": model_id,
+        "provider": {
+            "only": ["google-ai-studio"],
+            "allow_fallbacks": False,
+        },
         "messages": [{"role": "system", "content": system_prompt}, *validated_messages],
         "temperature": 0.4,
         "max_tokens": 1200,
