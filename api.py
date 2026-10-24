@@ -4,6 +4,7 @@ import pickle
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import numpy as np
 import pandas as pd
@@ -11,18 +12,54 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 
+def parse_allowed_origins(configured_origins):
+    allowed_origins = []
+    for configured_origin in configured_origins.split(","):
+        configured_origin = configured_origin.strip()
+        if not configured_origin:
+            continue
+
+        try:
+            parsed_origin = urlsplit(configured_origin)
+            port = parsed_origin.port
+        except ValueError as error:
+            raise RuntimeError(
+                "FRONTEND_ORIGINS must contain valid explicit origins."
+            ) from error
+        if (
+            parsed_origin.scheme.lower() not in ("http", "https")
+            or not parsed_origin.hostname
+            or parsed_origin.username
+            or parsed_origin.password
+            or parsed_origin.path not in ("", "/")
+            or parsed_origin.query
+            or parsed_origin.fragment
+            or "*" in parsed_origin.netloc
+        ):
+            raise RuntimeError(
+                "FRONTEND_ORIGINS must contain valid HTTP(S) origins without paths."
+            )
+
+        hostname = parsed_origin.hostname.lower()
+        if ":" in hostname:
+            hostname = f"[{hostname}]"
+        origin = f"{parsed_origin.scheme.lower()}://{hostname}"
+        if port is not None:
+            origin += f":{port}"
+        if origin not in allowed_origins:
+            allowed_origins.append(origin)
+
+    if not allowed_origins:
+        raise RuntimeError("FRONTEND_ORIGINS must contain explicit allowed origins.")
+    return allowed_origins
+
+
 app = Flask(__name__)
 
-allowed_origins = [
-    origin.strip()
-    for origin in os.environ.get(
-        "FRONTEND_ORIGINS",
-        "https://idea-evaluator-jet.vercel.app,http://localhost:5173,http://127.0.0.1:5173",
-    ).split(",")
-    if origin.strip()
-]
-if not allowed_origins or "*" in allowed_origins:
-    raise RuntimeError("FRONTEND_ORIGINS must contain explicit allowed origins.")
+allowed_origins = parse_allowed_origins(os.environ.get(
+    "FRONTEND_ORIGINS",
+    "https://idea-evaluator-jet.vercel.app,http://localhost:5173,http://127.0.0.1:5173",
+))
 
 CORS(
     app,
@@ -192,6 +229,27 @@ def _provider_error(status):
     return "OpenRouter could not complete the evaluation. Check the backend configuration."
 
 
+def _safe_provider_error_details(error, api_key, messages, system_prompt):
+    retry_after = error.headers.get("Retry-After") if error.headers else None
+    if retry_after is not None:
+        retry_after = "".join(
+            character for character in retry_after if character.isprintable()
+        )[:128]
+
+    try:
+        response_body = error.read(4096).decode("utf-8", errors="replace")
+    except OSError:
+        response_body = "<unavailable>"
+
+    sensitive_values = [api_key, system_prompt]
+    sensitive_values.extend(message["content"] for message in messages)
+    for sensitive_value in sensitive_values:
+        if sensitive_value:
+            response_body = response_body.replace(sensitive_value, "[REDACTED]")
+
+    return response_body, retry_after
+
+
 @app.route("/api/ai-evaluate", methods=["POST"])
 def ai_evaluate():
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
@@ -260,8 +318,25 @@ def ai_evaluate():
         with urllib.request.urlopen(provider_request, timeout=30) as response:
             provider_response = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
-        app.logger.warning("OpenRouter request failed with HTTP status %s", error.code)
-        return jsonify({"error": _provider_error(error.code)}), 502
+        response_body, retry_after = _safe_provider_error_details(
+            error, api_key, validated_messages, system_prompt
+        )
+        app.logger.warning(
+            "OpenRouter request failed with HTTP status %s; Retry-After=%s; "
+            "response body=%s",
+            error.code,
+            retry_after or "<not provided>",
+            response_body,
+        )
+        error_message = _provider_error(error.code)
+        if error.code == 429:
+            if retry_after:
+                error_message = f"{error_message} Retry after {retry_after}."
+            response = {"error": error_message}
+            if retry_after:
+                response["retry_after"] = retry_after
+            return jsonify(response), 429
+        return jsonify({"error": error_message}), 502
     except (TimeoutError, urllib.error.URLError):
         app.logger.warning("OpenRouter request timed out or could not connect")
         return jsonify({"error": "OpenRouter could not be reached before the request timed out"}), 504

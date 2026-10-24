@@ -202,10 +202,15 @@ class ApiTests(TestCase):
             with patch("api.urllib.request.urlopen", return_value=provider_response) as open_url:
                 response = self.client.post(
                     "/api/ai-evaluate",
+                    headers={"Origin": "https://idea-evaluator-jet.vercel.app"},
                     json={"messages": [{"role": "user", "content": "A startup idea"}]},
                 )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["Access-Control-Allow-Origin"],
+            "https://idea-evaluator-jet.vercel.app",
+        )
         self.assertEqual(response.get_json(), {"reply": "A real provider evaluation."})
         provider_request = open_url.call_args.args[0]
         self.assertEqual(provider_request.full_url, "https://openrouter.ai/api/v1/chat/completions")
@@ -219,13 +224,50 @@ class ApiTests(TestCase):
             "content": "A startup idea",
         })
 
-    def test_ai_endpoint_maps_provider_rate_limit(self):
+    def test_ai_endpoint_returns_rate_limit_and_retry_after(self):
+        error = HTTPError(
+            "https://openrouter.ai/api/v1/chat/completions",
+            429,
+            "rate limited",
+            hdrs={"Retry-After": "17"},
+            fp=BytesIO(
+                b'{"error":"provider busy","echo":"private startup idea",'
+                b'"credential":"test-key"}'
+            ),
+        )
+
+        with patch.dict(os.environ, {
+            "OPENROUTER_API_KEY": "test-key",
+            "OPENROUTER_MODEL": "recursive/flint-v1.0:free",
+        }, clear=True):
+            with patch("api.urllib.request.urlopen", side_effect=error):
+                with patch.object(api.app.logger, "warning") as warning:
+                    response = self.client.post(
+                        "/api/ai-evaluate",
+                        json={"messages": [{
+                            "role": "user",
+                            "content": "private startup idea",
+                        }]},
+                    )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("rate limit", response.get_json()["error"])
+        self.assertEqual(response.get_json()["retry_after"], "17")
+        logged_details = " ".join(
+            call.args[0] % call.args[1:] for call in warning.call_args_list
+        )
+        self.assertIn("Retry-After=17", logged_details)
+        self.assertIn("provider busy", logged_details)
+        self.assertNotIn("test-key", logged_details)
+        self.assertNotIn("private startup idea", logged_details)
+
+    def test_ai_endpoint_handles_malformed_rate_limit_error_body(self):
         error = HTTPError(
             "https://openrouter.ai/api/v1/chat/completions",
             429,
             "rate limited",
             hdrs=None,
-            fp=BytesIO(b"{}"),
+            fp=BytesIO(b"not-json"),
         )
 
         with patch.dict(os.environ, {
@@ -238,8 +280,9 @@ class ApiTests(TestCase):
                     json={"messages": [{"role": "user", "content": "A startup idea"}]},
                 )
 
-        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.status_code, 429)
         self.assertIn("rate limit", response.get_json()["error"])
+        self.assertNotIn("retry_after", response.get_json())
 
     def test_ai_endpoint_does_not_expose_provider_authentication_errors(self):
         error = HTTPError(
@@ -343,13 +386,17 @@ class ApiTests(TestCase):
         )
 
     def test_production_origin_is_allowed_and_unknown_origins_are_not(self):
-        allowed = self.client.options(
-            "/api/ai-evaluate",
-            headers={
-                "Origin": "https://idea-evaluator-jet.vercel.app",
-                "Access-Control-Request-Method": "POST",
-            },
-        )
+        allowed_responses = [
+            self.client.options(
+                path,
+                headers={
+                    "Origin": "https://idea-evaluator-jet.vercel.app",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+            for path in ("/api/ai-evaluate", "/evaluate")
+        ]
         blocked = self.client.options(
             "/api/ai-evaluate",
             headers={
@@ -358,8 +405,37 @@ class ApiTests(TestCase):
             },
         )
 
+        for allowed in allowed_responses:
+            self.assertEqual(
+                allowed.headers["Access-Control-Allow-Origin"],
+                "https://idea-evaluator-jet.vercel.app",
+            )
+            self.assertIn("POST", allowed.headers["Access-Control-Allow-Methods"])
+            self.assertIn("content-type", allowed.headers["Access-Control-Allow-Headers"].lower())
+        self.assertNotIn("Access-Control-Allow-Origin", blocked.headers)
+
+    def test_ml_post_includes_production_cors_headers(self):
+        with patch.object(api, "model", FakeModel()):
+            response = self.client.post(
+                "/evaluate",
+                headers={"Origin": "https://idea-evaluator-jet.vercel.app"},
+                json={"features": [1, 2]},
+            )
+
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            allowed.headers["Access-Control-Allow-Origin"],
+            response.headers["Access-Control-Allow-Origin"],
             "https://idea-evaluator-jet.vercel.app",
         )
-        self.assertNotIn("Access-Control-Allow-Origin", blocked.headers)
+
+    def test_configured_origins_trim_whitespace_and_normalize_trailing_slashes(self):
+        self.assertEqual(
+            api.parse_allowed_origins(
+                " https://idea-evaluator-jet.vercel.app/ , http://localhost:5173 "
+            ),
+            ["https://idea-evaluator-jet.vercel.app", "http://localhost:5173"],
+        )
+
+    def test_configured_origins_reject_url_paths(self):
+        with self.assertRaisesRegex(RuntimeError, "without paths"):
+            api.parse_allowed_origins("https://idea-evaluator-jet.vercel.app/app")
